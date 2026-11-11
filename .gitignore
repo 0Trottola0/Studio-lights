@@ -1,0 +1,10 @@
+# Credenziali generate da "tinytuya wizard": non vanno mai committate
+devices.json
+tinytuya.json
+tuya-raw.json
+snapshot.json
+__pycache__/
+*.bak
+devices.json.bak
+.venv/
+server.log
