@@ -65,6 +65,13 @@
   .picker { position: relative; width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--line);
             background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); cursor: pointer; }
   .picker input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; border: 0; padding: 0; }
+  .card.master { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+  .master .bulb { background: conic-gradient(#ffd9a8, #fff3e0, #ffd9a8); }
+  .master .bulb.lit { box-shadow: 0 0 18px var(--glow, var(--accent)); }
+  .seg { display: flex; gap: 6px; }
+  .copy { justify-self: start; font-size: 13px; padding: 6px 12px; color: var(--muted); }
+  .section-label { max-width: 720px; margin: 8px auto 0; font-size: 13px; color: var(--muted);
+                   text-transform: uppercase; letter-spacing: .04em; }
   .msg { text-align: center; color: var(--muted); padding: 32px 0; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--text);
            color: var(--bg); padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0;
@@ -75,13 +82,23 @@
 <body>
 <header>
   <h1>Luci Ufficio</h1>
-  <div class="actions">
-    <button class="pill" data-all="on">Tutte on</button>
-    <button class="pill" data-all="off">Tutte off</button>
-    <button class="pill" id="refresh" aria-label="Aggiorna">↻</button>
-  </div>
+  <button class="pill" id="refresh" aria-label="Aggiorna">↻ Aggiorna</button>
 </header>
-<main id="list"><p class="msg">Caricamento…</p></main>
+<main>
+  <section class="card master" id="all">
+    <div class="row">
+      <div class="bulb"></div>
+      <div class="name"><b>Tutte le lampadine</b><small id="all-sum"></small></div>
+      <div class="seg">
+        <button class="pill" data-all="on">On</button>
+        <button class="pill" data-all="off">Off</button>
+      </div>
+    </div>
+    <div class="controls" data-slot="controls"></div>
+  </section>
+  <p class="section-label">Singole lampadine</p>
+  <div id="list" style="display:grid;gap:12px"><p class="msg">Caricamento…</p></div>
+</main>
 <div class="toast" id="toast"></div>
 
 <template id="tpl">
@@ -91,7 +108,12 @@
       <div class="name"><b></b><small></small></div>
       <label class="switch"><input type="checkbox" aria-label="Accendi/spegni"><span></span></label>
     </div>
-    <div class="controls">
+    <div class="controls" data-slot="controls"></div>
+  </section>
+</template>
+
+<template id="tpl-controls">
+  <div>
       <label class="ctl bri">Luminosità <input type="range" min="1" max="100"></label>
       <label class="ctl tmp">Bianco <input class="temp" type="range" min="0" max="100"
              title="caldo ← → freddo"></label>
@@ -104,19 +126,19 @@
         <button class="sw" style="background:#bf5af2" data-c="#bf5af2" aria-label="Viola"></button>
         <label class="picker" title="Altro colore"><input type="color" aria-label="Colore personalizzato"></label>
       </div>
-    </div>
-  </section>
+  </div>
 </template>
 
 <script>
 const $ = (s, r = document) => r.querySelector(s);
 const list = $("#list");
+let lights = [];
 let pin = "";
 try { pin = localStorage.getItem("luci-pin") || ""; } catch (e) {}
 
 function toast(text) {
   const t = $("#toast"); t.textContent = text; t.classList.add("show");
-  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2500);
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("show"), 2800);
 }
 
 async function api(path, body) {
@@ -140,8 +162,31 @@ function glow(l) {
   if (!l.on) return "";
   if (l.mode === "colour" && l.colour) return l.colour;
   const t = (l.temp ?? 50) / 100; // 0 caldo → 1 freddo
-  const r = 255, g = Math.round(190 + 60 * t), b = Math.round(120 + 135 * t);
-  return `rgb(${r},${g},${b})`;
+  return `rgb(255,${Math.round(190 + 60 * t)},${Math.round(120 + 135 * t)})`;
+}
+
+// Monta slider e colori dentro una scheda e collega gli eventi
+function mountControls(root, h) {
+  const box = $("#tpl-controls").content.firstElementChild.cloneNode(true);
+  const slot = $("[data-slot=controls]", root);
+  slot.replaceChildren(...box.childNodes);
+  $(".bri input", slot).addEventListener("change", e => h.brightness(+e.target.value));
+  $(".tmp input", slot).addEventListener("change", e => h.temp(+e.target.value));
+  slot.querySelectorAll(".sw").forEach(b => b.addEventListener("click", () => h.colour(b.dataset.c)));
+  $("input[type=color]", slot).addEventListener("change", e => h.colour(e.target.value));
+  if (h.copy) {
+    const btn = document.createElement("button");
+    btn.className = "pill copy"; btn.textContent = "⧉ Copia su tutte";
+    btn.title = "Applica colore e intensità di questa lampadina a tutte le altre";
+    btn.addEventListener("click", h.copy);
+    slot.append(btn);
+  }
+}
+
+function setSliders(root, v) {
+  if (v.brightness != null) $(".bri input", root).value = v.brightness;
+  if (v.temp != null) $(".tmp input", root).value = v.temp;
+  if (v.colour) $("input[type=color]", root).value = v.colour;
 }
 
 function paint(card, l) {
@@ -159,53 +204,96 @@ function paint(card, l) {
   $(".bri", card).hidden = !l.has_brightness;
   $(".tmp", card).hidden = !l.has_temp;
   $(".col", card).hidden = !l.has_colour;
-  if (l.brightness != null) $(".bri input", card).value = l.brightness;
-  if (l.temp != null) $(".tmp input", card).value = l.temp;
-  if (l.colour) $("input[type=color]", card).value = l.colour;
+  setSliders(card, l);
 }
 
-async function send(card, l, cmd, optimistic) {
-  const prev = { ...l };
-  Object.assign(l, optimistic); paint(card, l);
+function cardOf(l) { return list.querySelector(`[data-id="${l.id}"]`); }
+
+async function send(l, cmd, optimistic) {
+  const card = cardOf(l), prev = { ...l };
+  Object.assign(l, optimistic); paint(card, l); paintMaster();
   try { await api(`/api/lights/${l.id}`, cmd); }
-  catch (e) { Object.assign(l, prev); paint(card, l); toast(`${l.name}: ${e.message}`); }
+  catch (e) { Object.assign(l, prev); paint(card, l); paintMaster(); toast(`${l.name}: ${e.message}`); }
 }
+
+// Invia lo stesso comando a tutte le lampadine raggiungibili
+async function sendAll(cmd, optimistic, okText) {
+  const targets = lights.filter(l => l.online);
+  if (!targets.length) return toast("Nessuna lampadina raggiungibile");
+  targets.forEach(l => { Object.assign(l, optimistic); paint(cardOf(l), l); });
+  paintMaster();
+  try {
+    const { results } = await api("/api/all", cmd);
+    const ko = results.filter(r => !r.ok && lights.find(l => l.id === r.id)?.online);
+    toast(ko.length ? `${ko.length} lampadine non hanno risposto` : okText);
+  } catch (e) { toast(e.message); }
+  setTimeout(load, 800); // riallinea con lo stato reale
+}
+
+// Valori della scheda "Tutte": presi dalla prima lampadina accesa
+const master = { brightness: 80, temp: 50 };
+function paintMaster() {
+  const online = lights.filter(l => l.online), on = online.filter(l => l.on);
+  $("#all-sum").textContent = !lights.length ? "" :
+    `${on.length} accese su ${lights.length}` + (online.length < lights.length ? ` · ${lights.length - online.length} non raggiungibil${lights.length - online.length === 1 ? "e" : "i"}` : "");
+  const ref = on[0];
+  if (ref) { master.brightness = ref.brightness ?? master.brightness; master.temp = ref.temp ?? master.temp; }
+  const all = $("#all");
+  $(".bulb", all).classList.toggle("lit", on.length > 0);
+  $(".bri", all).hidden = !online.some(l => l.has_brightness);
+  $(".tmp", all).hidden = !online.some(l => l.has_temp);
+  $(".col", all).hidden = !online.some(l => l.has_colour);
+  $(".controls", all).hidden = !online.length;
+  setSliders(all, master);
+}
+
+mountControls($("#all"), {
+  brightness: v => { master.brightness = v;
+    sendAll({ action: "brightness", value: v }, { brightness: v }, `Intensità ${v}% su tutte`); },
+  temp: v => { master.temp = v;
+    sendAll({ action: "white", temp: v, brightness: master.brightness },
+            { temp: v, mode: "white", on: true }, "Bianco applicato a tutte"); },
+  colour: c => sendAll({ action: "colour", hex: c, brightness: master.brightness },
+                       { colour: c, mode: "colour", on: true }, "Colore applicato a tutte"),
+});
 
 function build(l) {
   const card = $("#tpl").content.firstElementChild.cloneNode(true);
   card.dataset.id = l.id;
+  list.append(card);
   $(".switch input", card).addEventListener("change", e =>
-    send(card, l, { action: "power", on: e.target.checked }, { on: e.target.checked }));
-  $(".bri input", card).addEventListener("change", e =>
-    send(card, l, { action: "brightness", value: +e.target.value }, { brightness: +e.target.value }));
-  $(".tmp input", card).addEventListener("change", e =>
-    send(card, l, { action: "white", temp: +e.target.value, brightness: l.brightness ?? 100 },
-         { temp: +e.target.value, mode: "white" }));
-  const setColour = c => send(card, l, { action: "colour", hex: c }, { colour: c, mode: "colour" });
-  card.querySelectorAll(".sw").forEach(b => b.addEventListener("click", () => setColour(b.dataset.c)));
-  $("input[type=color]", card).addEventListener("change", e => setColour(e.target.value));
+    send(l, { action: "power", on: e.target.checked }, { on: e.target.checked }));
+  mountControls(card, {
+    brightness: v => send(l, { action: "brightness", value: v }, { brightness: v }),
+    temp: v => send(l, { action: "white", temp: v, brightness: l.brightness ?? 100 }, { temp: v, mode: "white" }),
+    colour: c => send(l, { action: "colour", hex: c, brightness: l.brightness ?? 100 }, { colour: c, mode: "colour" }),
+    copy: () => {
+      const colour = l.mode === "colour" && l.colour;
+      sendAll({ action: "scene", on: true, mode: colour ? "colour" : "white", hex: l.colour,
+                brightness: l.brightness ?? 100, temp: l.temp ?? 50 },
+              { on: true, mode: colour ? "colour" : "white", colour: l.colour,
+                brightness: l.brightness, temp: l.temp },
+              `Impostazioni di "${l.name}" copiate su tutte`);
+    },
+  });
   paint(card, l);
-  return card;
 }
 
 async function load() {
   try {
-    const { lights } = await api("/api/lights");
-    list.replaceChildren(...lights.map(build));
+    ({ lights } = await api("/api/lights"));
+    list.replaceChildren();
+    lights.forEach(build);
     if (!lights.length) list.innerHTML = '<p class="msg">Nessuna lampadina.</p>';
   } catch (e) {
     list.innerHTML = `<p class="msg">Impossibile contattare il server: ${e.message}</p>`;
   }
+  paintMaster();
 }
 
-document.querySelectorAll("[data-all]").forEach(b => b.addEventListener("click", async () => {
+document.querySelectorAll("[data-all]").forEach(b => b.addEventListener("click", () => {
   const on = b.dataset.all === "on";
-  try {
-    const { results } = await api("/api/all", { action: "power", on });
-    const ko = results.filter(r => !r.ok).length;
-    if (ko) toast(`${ko} lampadine non hanno risposto`);
-  } catch (e) { toast(e.message); }
-  load();
+  sendAll({ action: "power", on }, { on }, on ? "Tutte accese" : "Tutte spente");
 }));
 $("#refresh").addEventListener("click", load);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });

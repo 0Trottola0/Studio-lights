@@ -9,6 +9,7 @@ Uso:
 Dipendenze: solo `tinytuya` (python3 -m pip install --user tinytuya).
 """
 
+import colorsys
 import json
 import os
 import socket
@@ -101,15 +102,33 @@ class Light:
                     colourtemp=clamp(cmd.get("temp", 50), 0, 100),
                 )
             elif action == "colour":
-                hexv = str(cmd.get("hex", "")).lstrip("#")
-                if len(hexv) != 6:
-                    raise ValueError("colore non valido")
-                r, g, b = (int(hexv[i : i + 2], 16) for i in (0, 2, 4))
-                res = self.dev.set_colour(r, g, b)
+                res = self._set_colour(cmd.get("hex"), cmd.get("brightness"))
+            elif action == "scene":
+                # Stato completo in un colpo solo: usato da "Tutte le lampadine" e "Copia su tutte"
+                if not cmd.get("on", True):
+                    res = self.dev.turn_off()
+                elif cmd.get("mode") == "colour" and cmd.get("hex") and self.dev.bulb_has_capability("colour"):
+                    res = self._set_colour(cmd["hex"], cmd.get("brightness"))
+                else:
+                    res = self.dev.set_white_percentage(
+                        brightness=clamp(cmd.get("brightness", 100), 1, 100),
+                        colourtemp=clamp(cmd.get("temp", 50), 0, 100),
+                    )
             else:
                 raise ValueError("azione sconosciuta: %r" % action)
         if isinstance(res, dict) and "Error" in res:
             raise RuntimeError(res["Error"])
+
+    def _set_colour(self, hex_colour, brightness=None):
+        """Imposta un colore; se brightness (1-100) è indicata, la usa come intensità."""
+        hexv = str(hex_colour or "").lstrip("#")
+        if len(hexv) != 6:
+            raise ValueError("colore non valido")
+        r, g, b = (int(hexv[i : i + 2], 16) for i in (0, 2, 4))
+        if brightness is None:
+            return self.dev.set_colour(r, g, b)
+        h, s, _ = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+        return self.dev.set_hsv(h, s, clamp(brightness, 1, 100) / 100)
 
 
 def clamp(value, lo, hi):

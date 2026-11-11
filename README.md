@@ -4,7 +4,8 @@ App leggerissima per comandare le lampadine **Avatar** (e in generale qualunque 
 
 - **Server**: un solo file Python (`server.py`). L'unica dipendenza è `tinytuya`.
 - **App**: una pagina web (`static/index.html`) da aprire su telefono o PC e da aggiungere alla schermata home.
-- **Funzioni**: accensione e spegnimento, luminosità, bianco caldo/freddo, colori, "Tutte on/off".
+- **Funzioni**: accensione e spegnimento, luminosità, bianco caldo/freddo, colori.
+- **Tutte insieme**: la scheda "Tutte le lampadine" in cima imposta accensione, intensità, bianco o colore su tutte con un solo gesto. Il pulsante "Copia su tutte" di ogni lampadina replica le sue impostazioni su tutte le altre.
 
 ```
 Telefono / PC  ──http──▶  server.py (Mac in ufficio)  ──Tuya locale──▶  lampadine
